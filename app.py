@@ -56,6 +56,27 @@ with st.sidebar:
 
     st.subheader("2. LT 计算方式")
     lt_method = st.radio("选择方法", ["幂函数拟合", "分段求和"], index=0)
+    with st.expander("方法说明"):
+        if lt_method == "幂函数拟合":
+            st.markdown("""
+**幂函数拟合** R(n) = a × n^b
+
+将留存数据拟合为幂函数曲线，再对曲线做积分求 LT。
+
+- 优点：可平滑外推到任意天数，不受原始数据长度限制
+- 适用：数据点较少（如只有7天数据）但需要预测长期 LT 时
+- 计算：LT = 1 + ∫₁ⁿ a×x^b dx
+""")
+        else:
+            st.markdown("""
+**分段求和**
+
+直接对每日留存率逐天累加，超出数据范围的部分按最后的衰减趋势外推。
+
+- 优点：完全忠于实际数据，不依赖拟合假设
+- 适用：数据天数充足（≥30天），或留存曲线不符合幂函数形状时
+- 计算：LT = 1 + R(1) + R(2) + ... + R(n)
+""")
 
     st.subheader("3. 新增用户")
     new_user_mode = st.radio("新增模式", ["固定日新增", "增长率递增", "自定义输入"])
@@ -196,16 +217,26 @@ fig_dau.add_trace(go.Scatter(
     x=pred_days, y=dau_curve,
     mode='lines', name='DAU',
     fill='tozeroy', fillcolor='rgba(66,133,244,0.1)',
-    line=dict(color='#4285F4', width=2)
+    line=dict(color='#4285F4', width=3),
+    hovertemplate='<b>第 %{x} 天</b><br>DAU: <b>%{y:,.0f}</b><extra></extra>'
 ))
 fig_dau.add_trace(go.Scatter(
     x=pred_days, y=new_users_array,
     mode='lines', name='日新增',
-    line=dict(color='#34A853', width=1, dash='dot')
+    line=dict(color='#34A853', width=1.5, dash='dot'),
+    hovertemplate='<b>第 %{x} 天</b><br>日新增: %{y:,.0f}<extra></extra>'
 ))
 fig_dau.update_layout(
     xaxis_title="天数", yaxis_title="用户数",
-    height=400, yaxis_tickformat=","
+    height=450, yaxis_tickformat=",",
+    hovermode="x unified",
+    hoverlabel=dict(
+        bgcolor="white",
+        font_size=16,
+        font_family="Arial",
+        bordercolor="#ccc",
+    ),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
 )
 st.plotly_chart(fig_dau, use_container_width=True)
 
