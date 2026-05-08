@@ -145,3 +145,43 @@ def generate_new_users_array(mode, predict_days, daily_new=1000, growth_rate=0.0
             arr = np.concatenate([arr, np.full(predict_days - len(arr), arr[-1])])
         return arr[:predict_days]
     return np.full(predict_days, daily_new, dtype=float)
+
+
+def calc_required_retention(target_dau, daily_new, current_retention, method="fitting"):
+    """根据目标 DAU 和日新增，反推需要的留存水平
+    稳态 DAU ≈ daily_new × LT，所以 LT_needed = target_dau / daily_new
+    然后根据当前留存曲线的形状（衰减速率 b），反推需要的 a 值，
+    再输出建议的关键天留存率。
+
+    返回: dict with required_lt, suggested_retention (关键天), scale_factor
+    """
+    lt_needed = target_dau / daily_new
+
+    days = np.arange(1, len(current_retention) + 1)
+    current_arr = np.array(current_retention, dtype=float)
+
+    if method == "fitting":
+        a, b = fit_retention(days, current_arr)
+        current_lt = calc_lt_fitting(a, b, 365)
+        scale_factor = lt_needed / current_lt if current_lt > 0 else 1.0
+        a_new = a * scale_factor
+        suggested = {}
+        for d in [1, 3, 7, 14, 30, 60, 90]:
+            suggested[f"第{d}天"] = min(power_func(d, a_new, b), 1.0)
+    else:
+        current_lt = calc_lt_sum(current_arr)
+        scale_factor = lt_needed / current_lt if current_lt > 0 else 1.0
+        suggested = {}
+        for d in [1, 3, 7, 14, 30, 60, 90]:
+            if d - 1 < len(current_arr):
+                suggested[f"第{d}天"] = min(current_arr[d - 1] * scale_factor, 1.0)
+            else:
+                ext = extend_retention_curve(current_arr, d)
+                suggested[f"第{d}天"] = min(ext[d - 1] * scale_factor, 1.0)
+
+    return {
+        "required_lt": lt_needed,
+        "current_lt": current_lt if method == "fitting" else calc_lt_sum(current_arr),
+        "scale_factor": scale_factor,
+        "suggested_retention": suggested,
+    }

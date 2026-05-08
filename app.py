@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from calculator import (
     fit_retention, get_retention_curve, calc_lt_fitting, calc_lt_sum,
-    calc_lt_multi, parse_imported_retention,
+    calc_lt_multi, parse_imported_retention, calc_required_retention,
     predict_dau, generate_new_users_array, extend_retention_curve
 )
 
@@ -217,3 +217,37 @@ with st.expander("查看详细数据"):
         "日新增": new_users_array.astype(int),
     })
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+# --- 反推建议留存 ---
+st.divider()
+st.subheader("目标 DAU 反推建议留存")
+st.markdown("输入目标 DAU 和日新增，基于当前留存曲线形状，反推各关键节点需要达到的留存率")
+
+rcol1, rcol2 = st.columns(2)
+with rcol1:
+    target_dau = st.number_input("目标 DAU", min_value=100, value=50000, step=1000)
+    target_daily_new = st.number_input("计划日新增", min_value=1, value=int(daily_new), step=100, key="target_new")
+
+with rcol2:
+    result = calc_required_retention(target_dau, target_daily_new, retention_rates, method=method_key)
+
+    st.metric("需要的 LT", f"{result['required_lt']:.2f} 天")
+    st.metric("当前 LT（365天）", f"{result['current_lt']:.2f} 天")
+    improvement = (result['scale_factor'] - 1) * 100
+    if improvement > 0:
+        st.metric("留存需提升", f"{improvement:.1f}%", delta=f"↑ 整体需提升 {improvement:.1f}%")
+    else:
+        st.metric("留存余量", f"{-improvement:.1f}%", delta=f"当前留存已满足目标")
+
+st.markdown("**建议各关键节点留存率：**")
+sug = result['suggested_retention']
+sug_cols = st.columns(len(sug))
+for i, (day_label, rate) in enumerate(sug.items()):
+    with sug_cols[i]:
+        current_idx = int(day_label.replace("第", "").replace("天", "")) - 1
+        current_val = retention_rates[current_idx] if current_idx < len(retention_rates) else None
+        delta_str = None
+        if current_val is not None:
+            diff = (rate - current_val) * 100
+            delta_str = f"{diff:+.1f}pp" if diff != 0 else "已达标"
+        st.metric(day_label, f"{rate*100:.1f}%", delta=delta_str)
