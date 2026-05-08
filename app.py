@@ -78,7 +78,11 @@ with st.sidebar:
 - 计算：LT = 1 + R(1) + R(2) + ... + R(n)
 """)
 
-    st.subheader("3. 新增用户")
+    st.subheader("3. 当前 DAU 基数")
+    base_dau = st.number_input("当前产品 DAU（0 表示从零开始）", min_value=0, value=0, step=1000,
+                                help="已有用户会按留存曲线自然衰减，新增用户在此基础上叠加")
+
+    st.subheader("4. 新增用户")
     new_user_mode = st.radio("新增模式", ["固定日新增", "增长率递增", "自定义输入"])
     daily_new = st.number_input("日新增用户", min_value=1, value=1000, step=100)
 
@@ -91,7 +95,7 @@ with st.sidebar:
         if custom_input.strip():
             custom_new_users = [float(x.strip()) for x in custom_input.strip().split("\n") if x.strip()]
 
-    st.subheader("4. 预测天数")
+    st.subheader("5. 预测天数")
     predict_days = st.number_input("预测天数", min_value=7, max_value=365, value=90)
 
 # --- 解析留存数据 ---
@@ -209,7 +213,7 @@ new_users_array = generate_new_users_array(
     custom_array=custom_new_users
 )
 
-dau_curve = predict_dau(new_users_array, retention_for_predict, int(predict_days))
+dau_curve = predict_dau(new_users_array, retention_for_predict, int(predict_days), base_dau=base_dau)
 
 fig_dau = go.Figure()
 pred_days = np.arange(1, predict_days + 1)

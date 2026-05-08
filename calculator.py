@@ -105,9 +105,11 @@ def extend_retention_curve(retention_rates, target_days):
     return np.array(extended)
 
 
-def predict_dau(new_users_array, retention_curve, predict_days):
+def predict_dau(new_users_array, retention_curve, predict_days, base_dau=0):
     """预测 DAU
-    DAU(T) = Σ new_users[i] * retention[T-i], i=0..T
+    DAU(T) = 存量衰减 + 新增累积
+    存量衰减：base_dau * retention[T] （存量用户按留存曲线自然流失）
+    新增累积：Σ new_users[i] * retention[T-i], i=0..T
     retention[0] = 1.0（注册当天）
     """
     full_retention = np.concatenate([[1.0], retention_curve])
@@ -120,7 +122,16 @@ def predict_dau(new_users_array, retention_curve, predict_days):
 
     dau = np.zeros(predict_days)
     for t in range(predict_days):
-        daily_dau = 0.0
+        # 存量用户衰减
+        if base_dau > 0 and t + 1 < len(full_retention):
+            base_remaining = base_dau * full_retention[t + 1]
+        elif base_dau > 0:
+            base_remaining = base_dau * full_retention[-1]
+        else:
+            base_remaining = 0.0
+
+        # 新增用户累积
+        new_contribution = 0.0
         for i in range(t + 1):
             if i < len(new_users_array):
                 nu = new_users_array[i]
@@ -128,8 +139,9 @@ def predict_dau(new_users_array, retention_curve, predict_days):
                 nu = new_users_array[-1]
             day_diff = t - i
             if day_diff < len(full_retention):
-                daily_dau += nu * full_retention[day_diff]
-        dau[t] = daily_dau
+                new_contribution += nu * full_retention[day_diff]
+
+        dau[t] = base_remaining + new_contribution
     return dau
 
 
