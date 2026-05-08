@@ -105,10 +105,28 @@ def extend_retention_curve(retention_rates, target_days):
     return np.array(extended)
 
 
-def predict_dau(new_users_array, retention_curve, predict_days, base_dau=0):
+def calc_daily_active_retention(retention_rates):
+    """从留存曲线尾部计算日活跃留存率（老用户的日留存比例）
+    取留存曲线后半段的日环比均值，代表成熟用户每天的留存概率
+    """
+    rates = np.array(retention_rates, dtype=float)
+    if len(rates) < 4:
+        return rates[-1] / rates[-2] if len(rates) >= 2 and rates[-2] > 0 else 0.95
+
+    # 用后半段数据的日环比
+    half = max(len(rates) // 2, 2)
+    tail = rates[half:]
+    ratios = tail[1:] / tail[:-1]
+    ratios = ratios[(ratios > 0.5) & (ratios < 1.0)]
+    if len(ratios) == 0:
+        return 0.95
+    return float(np.mean(ratios))
+
+
+def predict_dau(new_users_array, retention_curve, predict_days, base_dau=0, base_daily_retention=None):
     """预测 DAU
     DAU(T) = 存量衰减 + 新增累积
-    存量衰减：base_dau * retention[T] （存量用户按留存曲线自然流失）
+    存量衰减：base_dau * daily_retention^T （老用户按日活跃留存率平缓衰减）
     新增累积：Σ new_users[i] * retention[T-i], i=0..T
     retention[0] = 1.0（注册当天）
     """
@@ -120,15 +138,13 @@ def predict_dau(new_users_array, retention_curve, predict_days, base_dau=0):
             extend_retention_curve(retention_curve, predict_days)
         ])
 
+    if base_daily_retention is None:
+        base_daily_retention = calc_daily_active_retention(retention_curve)
+
     dau = np.zeros(predict_days)
     for t in range(predict_days):
-        # 存量用户衰减：第0天保持原值，之后按留存曲线衰减
-        if base_dau > 0 and t < len(full_retention):
-            base_remaining = base_dau * full_retention[t]
-        elif base_dau > 0:
-            base_remaining = base_dau * full_retention[-1]
-        else:
-            base_remaining = 0.0
+        # 存量用户按日活跃留存率平缓衰减
+        base_remaining = base_dau * (base_daily_retention ** t) if base_dau > 0 else 0.0
 
         # 新增用户累积
         new_contribution = 0.0

@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from calculator import (
     fit_retention, get_retention_curve, calc_lt_fitting, calc_lt_sum,
     calc_lt_multi, parse_imported_retention, calc_required_retention,
+    calc_daily_active_retention,
     predict_dau, generate_new_users_array, extend_retention_curve
 )
 
@@ -80,7 +81,16 @@ with st.sidebar:
 
     st.subheader("3. 当前 DAU 基数")
     base_dau = st.number_input("当前产品 DAU（0 表示从零开始）", min_value=0, value=0, step=1000,
-                                help="已有用户会按留存曲线自然衰减，新增用户在此基础上叠加")
+                                help="已有用户按日活跃留存率平缓衰减，新增用户在此基础上叠加")
+    base_daily_ret_override = None
+    if base_dau > 0:
+        auto_rate = st.checkbox("自动计算日活跃留存率", value=True,
+                                help="从留存曲线尾部推算老用户的每日留存比例")
+        if not auto_rate:
+            base_daily_ret_override = st.number_input(
+                "日活跃留存率 (%)", min_value=80.0, max_value=99.9, value=96.0, step=0.1,
+                help="今天活跃的老用户明天还活跃的比例"
+            ) / 100.0
 
     st.subheader("4. 新增用户")
     new_user_mode = st.radio("新增模式", ["固定日新增", "增长率递增", "自定义输入"])
@@ -213,7 +223,12 @@ new_users_array = generate_new_users_array(
     custom_array=custom_new_users
 )
 
-dau_curve = predict_dau(new_users_array, retention_for_predict, int(predict_days), base_dau=base_dau)
+dau_curve = predict_dau(new_users_array, retention_for_predict, int(predict_days),
+                        base_dau=base_dau, base_daily_retention=base_daily_ret_override)
+
+if base_dau > 0:
+    actual_rate = base_daily_ret_override if base_daily_ret_override else calc_daily_active_retention(retention_for_predict)
+    st.caption(f"📌 日活跃留存率: {actual_rate*100:.1f}%（老用户每天留存比例，基数按此速率平缓衰减）")
 
 fig_dau = go.Figure()
 pred_days = np.arange(1, predict_days + 1)
