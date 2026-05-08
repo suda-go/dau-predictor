@@ -20,6 +20,9 @@ def get_retention_curve(a, b, max_day):
     return power_func(days, a, b)
 
 
+LT_DIMENSIONS = [7, 30, 90, 180, 365]
+
+
 def calc_lt_fitting(a, b, max_day):
     """通过幂函数积分计算 LT
     LT = 1(注册当天) + ∫₁^max_day a * x^b dx
@@ -36,6 +39,51 @@ def calc_lt_sum(retention_rates):
     LT = 1(注册当天) + Σ retention_rates
     """
     return 1.0 + np.sum(retention_rates)
+
+
+def calc_lt_multi(retention_rates, method="fitting"):
+    """计算多维度 LT：LT7, LT30, LT90, LT180, LT365"""
+    results = {}
+    if method == "fitting":
+        days = np.arange(1, len(retention_rates) + 1)
+        a, b = fit_retention(days, np.array(retention_rates))
+        for d in LT_DIMENSIONS:
+            results[f"LT{d}"] = calc_lt_fitting(a, b, d)
+    else:
+        extended = extend_retention_curve(retention_rates, 365)
+        for d in LT_DIMENSIONS:
+            results[f"LT{d}"] = 1.0 + np.sum(extended[:d])
+    return results
+
+
+def parse_imported_retention(df):
+    """从导入的 DataFrame 解析留存数据
+    支持格式：
+    - 列: day, retention (或 天数, 留存率)
+    - 或者单列留存率数据
+    """
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    col_map = {
+        '留存率': 'retention', '留存': 'retention', 'retention': 'retention',
+        'retention_rate': 'retention', 'rate': 'retention',
+        '天数': 'day', 'day': 'day', 'days': 'day', 'n': 'day',
+    }
+    df = df.rename(columns={c: col_map.get(c, c) for c in df.columns})
+
+    if 'retention' in df.columns:
+        retention = df['retention'].values.astype(float)
+    elif len(df.columns) == 1:
+        retention = df.iloc[:, 0].values.astype(float)
+    elif len(df.columns) == 2:
+        retention = df.iloc[:, 1].values.astype(float)
+    else:
+        retention = df.iloc[:, 1].values.astype(float)
+
+    if np.any(retention > 1.0):
+        retention = retention / 100.0
+
+    return retention
 
 
 def extend_retention_curve(retention_rates, target_days):

@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from calculator import (
     fit_retention, get_retention_curve, calc_lt_fitting, calc_lt_sum,
+    calc_lt_multi, parse_imported_retention,
     predict_dau, generate_new_users_array, extend_retention_curve
 )
 
@@ -22,20 +23,39 @@ with st.sidebar:
     st.header("参数设置")
 
     st.subheader("1. 留存数据")
-    use_example = st.checkbox("使用示例数据", value=True)
+    data_source = st.radio("数据来源", ["示例数据", "手动输入", "导入文件"])
 
-    if use_example:
+    retention_input = ""
+    if data_source == "示例数据":
         retention_input = "\n".join([str(r) for r in EXAMPLE_RETENTION])
-    else:
+    elif data_source == "手动输入":
         retention_input = st.text_area(
             "输入每日留存率（每行一个，从次留开始）",
             placeholder="0.45\n0.35\n0.28\n0.23\n...",
             height=200
         )
+    else:
+        uploaded_file = st.file_uploader(
+            "上传留存数据文件",
+            type=["csv", "xlsx", "xls"],
+            help="支持 CSV/Excel，列名可为: day/天数, retention/留存率；或单列留存率数据"
+        )
+        if uploaded_file is not None:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    df_import = pd.read_csv(uploaded_file)
+                else:
+                    df_import = pd.read_excel(uploaded_file)
+                imported_retention = parse_imported_retention(df_import)
+                retention_input = "\n".join([str(r) for r in imported_retention])
+                st.success(f"导入成功，共 {len(imported_retention)} 天数据")
+                with st.expander("预览导入数据"):
+                    st.dataframe(df_import.head(10))
+            except Exception as e:
+                st.error(f"文件解析失败: {e}")
 
     st.subheader("2. LT 计算方式")
     lt_method = st.radio("选择方法", ["幂函数拟合", "分段求和"], index=0)
-    lt_max_day = st.number_input("LT 计算截止天数", min_value=7, max_value=365, value=60)
 
     st.subheader("3. 新增用户")
     new_user_mode = st.radio("新增模式", ["固定日新增", "增长率递增", "自定义输入"])
@@ -54,6 +74,10 @@ with st.sidebar:
     predict_days = st.number_input("预测天数", min_value=7, max_value=365, value=90)
 
 # --- 解析留存数据 ---
+if not retention_input or not retention_input.strip():
+    st.info("请在左侧输入或导入留存数据")
+    st.stop()
+
 try:
     retention_rates = [float(x.strip()) for x in retention_input.strip().split("\n") if x.strip()]
     if any(r > 1.0 for r in retention_rates):
@@ -69,7 +93,11 @@ if len(retention_rates) < 2:
 days = np.arange(1, len(retention_rates) + 1)
 retention_arr = np.array(retention_rates)
 
-# --- LT 计算 ---
+# --- LT 多维度计算 ---
+method_key = "fitting" if lt_method == "幂函数拟合" else "sum"
+lt_multi = calc_lt_multi(retention_rates, method=method_key)
+
+# --- 留存曲线 & 指标 ---
 col1, col2 = st.columns(2)
 
 with col1:
@@ -78,8 +106,8 @@ with col1:
     if lt_method == "幂函数拟合":
         try:
             a, b = fit_retention(days, retention_arr)
-            fitted_curve = get_retention_curve(a, b, int(lt_max_day))
-            lt_value = calc_lt_fitting(a, b, lt_max_day)
+            fitted_curve = get_retention_curve(a, b, 365)
+            retention_for_predict = get_retention_curve(a, b, int(predict_days))
 
             fig_ret = go.Figure()
             fig_ret.add_trace(go.Scatter(
@@ -87,7 +115,7 @@ with col1:
                 mode='markers+lines', name='实际留存',
                 marker=dict(size=6)
             ))
-            fitted_days = np.arange(1, lt_max_day + 1)
+            fitted_days = np.arange(1, 366)
             fig_ret.add_trace(go.Scatter(
                 x=fitted_days, y=fitted_curve,
                 mode='lines', name=f'拟合: {a:.4f} × n^({b:.4f})',
@@ -98,15 +126,13 @@ with col1:
                 yaxis_tickformat=".0%", height=400
             )
             st.plotly_chart(fig_ret, use_container_width=True)
-
             st.info(f"拟合参数: a = {a:.4f}, b = {b:.4f}")
-            retention_for_predict = fitted_curve
         except Exception as e:
             st.error(f"拟合失败: {e}")
             st.stop()
     else:
-        lt_value = calc_lt_sum(retention_arr)
-        retention_for_predict = extend_retention_curve(retention_arr, int(lt_max_day))
+        retention_for_predict = extend_retention_curve(retention_arr, int(predict_days))
+        extended_full = extend_retention_curve(retention_arr, 365)
 
         fig_ret = go.Figure()
         fig_ret.add_trace(go.Scatter(
@@ -114,10 +140,10 @@ with col1:
             mode='markers+lines', name='实际留存',
             marker=dict(size=6)
         ))
-        if len(retention_for_predict) > len(retention_arr):
-            ext_days = np.arange(len(retention_arr) + 1, len(retention_for_predict) + 1)
+        if len(extended_full) > len(retention_arr):
+            ext_days = np.arange(len(retention_arr) + 1, len(extended_full) + 1)
             fig_ret.add_trace(go.Scatter(
-                x=ext_days, y=retention_for_predict[len(retention_arr):],
+                x=ext_days, y=extended_full[len(retention_arr):],
                 mode='lines', name='外推',
                 line=dict(dash='dot')
             ))
@@ -128,17 +154,27 @@ with col1:
         st.plotly_chart(fig_ret, use_container_width=True)
 
 with col2:
-    st.subheader("关键指标")
-    st.metric("LT（用户生命周期）", f"{lt_value:.2f} 天")
-    st.metric("次日留存", f"{retention_rates[0]*100:.1f}%")
-    if len(retention_rates) >= 7:
-        st.metric("7日留存", f"{retention_rates[6]*100:.1f}%")
-    if len(retention_rates) >= 30:
-        st.metric("30日留存", f"{retention_rates[29]*100:.1f}%")
+    st.subheader("LT 多维度指标")
 
+    lt_cols = st.columns(3)
+    for i, (key, val) in enumerate(lt_multi.items()):
+        with lt_cols[i % 3]:
+            st.metric(key, f"{val:.2f} 天")
+
+    st.divider()
+    st.subheader("留存关键节点")
+    ret_cols = st.columns(3)
+    ret_points = [("次留", 0), ("3留", 2), ("7留", 6), ("14留", 13), ("30留", 29), ("60留", 59)]
+    shown = 0
+    for label, idx in ret_points:
+        if idx < len(retention_rates):
+            with ret_cols[shown % 3]:
+                st.metric(label, f"{retention_rates[idx]*100:.1f}%")
+            shown += 1
+
+    st.divider()
     if new_user_mode == "固定日新增":
-        steady_dau = daily_new * lt_value
-        st.metric("稳态 DAU（理论值）", f"{steady_dau:,.0f}")
+        st.metric("稳态 DAU（LT365）", f"{daily_new * lt_multi['LT365']:,.0f}")
 
 # --- DAU 预测 ---
 st.subheader("DAU 预测")
