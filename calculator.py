@@ -122,9 +122,9 @@ def predict_dau(new_users_array, retention_curve, predict_days, base_dau=0):
 
     dau = np.zeros(predict_days)
     for t in range(predict_days):
-        # 存量用户衰减
-        if base_dau > 0 and t + 1 < len(full_retention):
-            base_remaining = base_dau * full_retention[t + 1]
+        # 存量用户衰减：第0天保持原值，之后按留存曲线衰减
+        if base_dau > 0 and t < len(full_retention):
+            base_remaining = base_dau * full_retention[t]
         elif base_dau > 0:
             base_remaining = base_dau * full_retention[-1]
         else:
