@@ -141,12 +141,22 @@ def predict_dau(new_users_array, retention_curve, predict_days, base_dau=0, base
     if base_daily_retention is None:
         base_daily_retention = calc_daily_active_retention(retention_curve)
 
+    # 基数DAU已包含当天新增，所以第0天直接用基数
+    # 从第1天起：基数中的存量老用户按日活跃留存率衰减 + 每天新增用户按留存曲线累积
+    # 存量老用户 = base_dau - 当天新增（第0天的新增已包含在基数中）
+    base_old_users = max(base_dau - new_users_array[0], 0) if base_dau > 0 else 0.0
+
     dau = np.zeros(predict_days)
     for t in range(predict_days):
-        # 存量用户按日活跃留存率平缓衰减
-        base_remaining = base_dau * (base_daily_retention ** t) if base_dau > 0 else 0.0
+        if t == 0 and base_dau > 0:
+            # 第0天直接用基数（已包含当天新增）
+            dau[t] = base_dau
+            continue
 
-        # 新增用户累积
+        # 存量老用户衰减
+        base_remaining = base_old_users * (base_daily_retention ** t) if base_dau > 0 else 0.0
+
+        # 新增用户累积（从第0天的新增开始算留存贡献）
         new_contribution = 0.0
         for i in range(t + 1):
             if i < len(new_users_array):
